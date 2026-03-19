@@ -1,0 +1,9 @@
+services:
+  cli:
+    build: ./cli
+    container_name: obs_cli
+    environment:
+      # URL of running backend
+      OBS_BACKEND_URL: http://host.docker.internal:8000
+    entrypoint: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped

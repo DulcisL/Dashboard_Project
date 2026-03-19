@@ -1,0 +1,63 @@
+services:
+  db:
+    image: postgres:16
+    container_name: obs_db
+    environment:
+      POSTGRES_DB: obs
+      POSTGRES_USER: obs_user
+      POSTGRES_PASSWORD: obs_password
+    volumes:
+      - obs_db_data:/var/lib/postgresql/data
+    networks:
+      - obs_net
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: obs_backend
+    depends_on:
+      - db
+    env_file:
+      - ./backend/.env
+    environment:
+      # These can also live in .env
+      DJANGO_SETTINGS_MODULE: mysite.settings
+      DB_NAME: obs
+      DB_USER: obs_user
+      DB_PASSWORD: obs_password
+      DB_HOST: db
+      DB_PORT: 5432
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - obs_net
+    command: >
+      python manage.py runserver 0.0.0.0:8000
+    restart: unless-stopped
+
+  agent:
+    build: ./agent
+    container_name: obs_agent
+    environment:
+      # Backend URL inside the Docker network
+      OBS_BACKEND_URL: http://backend:8000
+    networks:
+      - obs_net
+    restart: unless-stopped
+
+  cli:
+    build: ./cli
+    container_name: obs_cli
+    networks:
+      - obs_net
+    # Keep the container running so you can exec into it to run commands
+    entrypoint: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+
+volumes:
+  obs_db_data:
+
+networks:
+  obs_net:

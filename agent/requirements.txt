@@ -1,0 +1,6 @@
+psutil>=5.9
+requests>=2.31
+PyYAML>=6.0
+docker>=7.0
+pywin32>=306; platform_system == "Windows"
+nvidia-ml-py >= 2.285.0

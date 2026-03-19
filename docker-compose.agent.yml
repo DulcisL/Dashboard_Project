@@ -1,0 +1,10 @@
+services:
+  agent:
+    build: ./agent
+    container_name: obs_agent
+    environment:
+      # Point this at your backend URL.
+      # If backend runs via main compose file on same host:
+      # OBS_BACKEND_URL: http://host.docker.internal:8000
+      OBS_BACKEND_URL: http://host.docker.internal:8000
+    restart: unless-stopped
