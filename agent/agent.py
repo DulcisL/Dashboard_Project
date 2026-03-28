@@ -2,6 +2,9 @@ import os
 import psutil
 import json
 from pynvml import *
+import requests 
+from datetime import datetime
+import time
 
 """Health_Status
 desc: Gets health status information and returns it in a json string
@@ -20,11 +23,11 @@ class Health_Status:
 
     def __init__(self):
         self._sensor_temps = {}
-        self._cpu_temp = ""
-        self._cpu_usage = ""
-        self._graphics_temp = ""
-        self._graphics_usage = ""
-        self._memory_usage = ""
+        self._cpu_temp = {}
+        self._cpu_usage = {}
+        self._graphics_temp = {}
+        self._graphics_usage = {}
+        self._memory_usage = {}
 
         self.set_sensor_temps()
         self.set_cpu_temp()
@@ -53,85 +56,165 @@ class Health_Status:
 
     def set_sensor_temps(self):
         # Gets all temp sensor information in a dict : list format
-        self._sensor_temps = psutil.sensors_temperatures()
+        raw_sensor_temps = psutil.sensors_temperatures()
+        serialized_temps = {}
+
+        for sensor_name, sensor_entries in raw_sensor_temps.items():
+            serialized_temps[sensor_name] = []
+            for sensor_entry in sensor_entries:
+                serialized_temps[sensor_name].append(
+                    {
+                        "label": sensor_entry.label,
+                        "current": sensor_entry.current,
+                        "high": sensor_entry.high,
+                        "critical": sensor_entry.critical,
+                    }
+                )
+
+        self._sensor_temps = serialized_temps
         return self._sensor_temps
 
     def set_cpu_temp(self):
-        temps_string = "\n"
         self.set_sensor_temps()
         # Get only the core temperatures from psutil's "coretemp" sensor group.
         cores = self._sensor_temps.get("coretemp", [])
         if not cores:
-            self._cpu_temp = temps_string + "No core temperature sensors found.\n"
+            self._cpu_temp = {
+                "cores": [],
+                "message": "No core temperature sensors found.",
+            }
             return self._cpu_temp
 
+        core_temperatures = []
         for i, core in enumerate(cores):
-            label = f"Core {i}"
-            temp = core.current
-            critical = core.critical
-            if temp is None:
-                temps_string += f"{label}: unavailable\n"
-            else:
-                temps_string += f"{label}: {temp}, {critical}\n"
-        self._cpu_temp = temps_string
+            core_temperatures.append(
+                {
+                    "label": core.get("label") or f"Core {i}",
+                    "temperature_c": core.get("current"),
+                    "critical_c": core.get("critical"),
+                }
+            )
+
+        self._cpu_temp = {"cores": core_temperatures}
         return self._cpu_temp
 
     def set_cpu_usage(self):
-        usage_string = " \n"
         usage = psutil.cpu_percent(0.1, percpu=True)
-        average = 0
-        end_count = 0
-        for i in range(len(usage)):
-            usage_string += f"CPU {i + 1}: {usage[i]}% \n"
-            average += usage[i]
-            end_count = i + 1
-        usage_string += f"CPU Average: {average / end_count}% \n"
-        self._cpu_usage = usage_string
+        per_cpu_usage = []
+
+        for i, cpu_usage in enumerate(usage):
+            per_cpu_usage.append({"label": f"CPU {i + 1}", "usage_percent": cpu_usage})
+
+        average_usage = sum(usage) / len(usage) if usage else 0
+        self._cpu_usage = {
+            "per_cpu": per_cpu_usage,
+            "average_percent": average_usage,
+        }
         return self._cpu_usage
 
     def set_gpu_temp(self):
-        temp_string = ""
         try:
             # Nvidia gpu
             nvmlInit()
             handle = nvmlDeviceGetHandleByIndex(0)
-            temp_string = (
-                f"{nvmlDeviceGetTemperatureV(handle, NVML_TEMPERATURE_GPU)} C\n"
-            )
+            self._graphics_temp = {
+                "temperature_c": nvmlDeviceGetTemperatureV(handle, NVML_TEMPERATURE_GPU)
+            }
         except Exception as e:
-            temp_string = f"An Error occurred getting NVIDIA GPU info: {e}"
-        self._graphics_temp = temp_string
+            self._graphics_temp = {
+                "error": f"An Error occurred getting NVIDIA GPU info: {e}"
+            }
         return self._graphics_temp
 
     def set_gpu_usage(self):
-        usage_string = ""
         try:
             nvmlInit()
             handle = nvmlDeviceGetHandleByIndex(0)
-            usage_string = f"{nvmlDeviceGetUtilizationRates(handle).gpu}"
+            self._graphics_usage = {
+                "usage_percent": nvmlDeviceGetUtilizationRates(handle).gpu
+            }
         except Exception as e:
-            usage_string = f"An error occurred getting NVIDIA GPU info: {e}"
+            self._graphics_usage = {
+                "error": f"An error occurred getting NVIDIA GPU info: {e}"
+            }
 
-        self._graphics_usage = usage_string
         return self._graphics_usage
 
     def set_mem_usage(self):
-        usage_string = ""
         try:
-            usage_string = f" {psutil.virtual_memory()[2]}"
+            self._memory_usage = {"usage_percent": psutil.virtual_memory()[2]}
         except Exception as e:
-            usage_string = f"An error occurred getting system memory info: {e}"
-        self._memory_usage = usage_string
+            self._memory_usage = {
+                "error": f"An error occurred getting system memory info: {e}"
+            }
         return self._memory_usage
 
+    def _format_cpu_temp(self):
+        if self._cpu_temp.get("message"):
+            return self._cpu_temp["message"]
+
+        lines = []
+        for core in self._cpu_temp.get("cores", []):
+            label = core.get("label", "Unknown")
+            temperature = core.get("temperature_c")
+            critical = core.get("critical_c")
+            line = f"{label}: {temperature} C"
+            if critical is not None:
+                line += f" (critical: {critical} C)"
+            lines.append(line)
+
+        return "\n".join(lines) if lines else "Unavailable"
+
+    def _format_cpu_usage(self):
+        lines = []
+        for cpu in self._cpu_usage.get("per_cpu", []):
+            lines.append(f"{cpu.get('label', 'CPU')}: {cpu.get('usage_percent')}%")
+
+        if "average_percent" in self._cpu_usage:
+            lines.append(f"Average: {self._cpu_usage['average_percent']:.2f}%")
+
+        return "\n".join(lines) if lines else "Unavailable"
+
+    def _format_gpu_temp(self):
+        if self._graphics_temp.get("error"):
+            return self._graphics_temp["error"]
+
+        if "temperature_c" in self._graphics_temp:
+            return f"{self._graphics_temp['temperature_c']} C"
+
+        return "Unavailable"
+
+    def _format_gpu_usage(self):
+        if self._graphics_usage.get("error"):
+            return self._graphics_usage["error"]
+
+        if "usage_percent" in self._graphics_usage:
+            return f"{self._graphics_usage['usage_percent']}%"
+
+        return "Unavailable"
+
+    def _format_mem_usage(self):
+        if self._memory_usage.get("error"):
+            return self._memory_usage["error"]
+
+        if "usage_percent" in self._memory_usage:
+            return f"{self._memory_usage['usage_percent']}%"
+
+        return "Unavailable"
+
     def __str__(self):
-        return f"""
-CPU Temp: {self._cpu_temp}
-CPU Usage: {self._cpu_usage}
-Graphics Temp: {self._graphics_temp}
-Graphics Usage: {self._graphics_usage}
-Memory Usage: {self._memory_usage}
-        """
+        return (
+            "CPU Temp:\n"
+            f"{self._format_cpu_temp()}\n"
+            "CPU Usage:\n"
+            f"{self._format_cpu_usage()}\n"
+            "Graphics Temp:\n"
+            f"{self._format_gpu_temp()}\n"
+            "Graphics Usage:\n"
+            f"{self._format_gpu_usage()}\n"
+            "Memory Usage:\n"
+            f"{self._format_mem_usage()}"
+        )
 
 
 def convert_to_dict(status):
@@ -143,14 +226,15 @@ def convert_to_dict(status):
         "Memory Usage": status.get_mem_usage(),
     }
 
+interval = 300 # Send info every ~5minutes 
+while True:
+    # Get health check information
+    my_status = Health_Status()
 
-# Get health check information
-my_status = Health_Status()
-
-# Convert status to a json string
-json_formatted = json.dumps(convert_to_dict(my_status))
-
-
-print(json_formatted)
-
-# send system information
+    # Create payload
+    json_formatted = json.dumps({"Timestamp":datetime.now(), convert_to_dict(my_status)})
+    
+    # save to log
+    # send payload
+    # watch for timeout
+    time.sleep(interval)
