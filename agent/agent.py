@@ -2,9 +2,15 @@ import os
 import psutil
 import json
 from pynvml import *
-import requests 
+import requests
 from datetime import datetime
 import time
+
+
+# GLOBALS
+HIGH_USAGE = 75  # Percent
+HIGH_TEMP = 95  # Celcius
+
 
 """Health_Status
 desc: Gets health status information and returns it in a json string
@@ -28,6 +34,7 @@ class Health_Status:
         self._graphics_temp = {}
         self._graphics_usage = {}
         self._memory_usage = {}
+        self.issue = []
 
         self.set_sensor_temps()
         self.set_cpu_temp()
@@ -110,6 +117,9 @@ class Health_Status:
             "per_cpu": per_cpu_usage,
             "average_percent": average_usage,
         }
+        if average_usage > HIGH_USAGE:
+            self.issue.append("High_CPU_Usage")
+
         return self._cpu_usage
 
     def set_gpu_temp(self):
@@ -117,9 +127,11 @@ class Health_Status:
             # Nvidia gpu
             nvmlInit()
             handle = nvmlDeviceGetHandleByIndex(0)
-            self._graphics_temp = {
-                "temperature_c": nvmlDeviceGetTemperatureV(handle, NVML_TEMPERATURE_GPU)
-            }
+            temperature = nvmlDeviceGetTemperatureV(handle, NVML_TEMPERATURE_GPU)
+            self._graphics_temp = {"temperature_c": temperature}
+            if temperature > HIGH_TEMP:
+                self.issue.append("High_Temps")
+
         except Exception as e:
             self._graphics_temp = {
                 "error": f"An Error occurred getting NVIDIA GPU info: {e}"
@@ -130,9 +142,11 @@ class Health_Status:
         try:
             nvmlInit()
             handle = nvmlDeviceGetHandleByIndex(0)
-            self._graphics_usage = {
-                "usage_percent": nvmlDeviceGetUtilizationRates(handle).gpu
-            }
+            usage = nvmlDeviceGetUtilizationRates(handle).gpu
+            self._graphics_usage = {"usage_percent": usage}
+            if usage > HIGH_USAGE:
+                self.issue.append("High_GPU_Usage")
+
         except Exception as e:
             self._graphics_usage = {
                 "error": f"An error occurred getting NVIDIA GPU info: {e}"
@@ -142,7 +156,11 @@ class Health_Status:
 
     def set_mem_usage(self):
         try:
-            self._memory_usage = {"usage_percent": psutil.virtual_memory()[2]}
+            usage = psutil.virtual_memory()[2]
+            self._memory_usage = {"usage_percent": usage}
+            if usage > HIGH_USAGE:
+                self.issue.append("High_Memory_Usage")
+
         except Exception as e:
             self._memory_usage = {
                 "error": f"An error occurred getting system memory info: {e}"
@@ -226,15 +244,24 @@ def convert_to_dict(status):
         "Memory Usage": status.get_mem_usage(),
     }
 
-interval = 300 # Send info every ~5minutes 
+
+# Send metrics only if major change or critical issue arrises
+# Otherwise let connection api make requests for data
+previous_time = datetime.now()
 while True:
     # Get health check information
     my_status = Health_Status()
 
     # Create payload
-    json_formatted = json.dumps({"Timestamp":datetime.now(), convert_to_dict(my_status)})
-    
-    # save to log
-    # send payload
-    # watch for timeout
-    time.sleep(interval)
+    json_formatted = json.dumps(
+        {
+            "Timestamp": datetime.now().isoformat(),
+            "System Data": convert_to_dict(my_status),
+        }
+    )
+    # save to log?
+    # if issue send payload
+    issues = ["High_Temps", "High_CPU_Usage", "High_GPU_Usage", "High_Memory_Usage"]
+    if my_status.issue in issues:
+        # Send the payload
+        pass
