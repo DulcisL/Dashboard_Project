@@ -6,7 +6,7 @@ from pynvml import *
 """Health_Status
 desc: Gets health status information and returns it in a json string
 params: None
-return: status (json) - a json string of the health status
+return: status (string) - a string of the health status
 """
 
 
@@ -25,14 +25,22 @@ class Health_Status:
         self._graphics_temp = ""
         self._graphics_usage = ""
         self._memory_usage = ""
-
+        #Call the functions to get the information 
         self.set_sensor_temps()
         self.set_cpu_temp()
         self.set_cpu_usage()
         self.set_gpu_temp()
         self.set_gpu_usage()
         self.set_mem_usage()
+    """
+    desc: A series of getters that return the private function value. 
 
+    params:
+        self(Health_Status): The health status obj being passed to itself to call functions within
+
+    return:
+        returns various information about the system specifically. 
+    """
     def get_sensor_temps(self):
         return self._sensor_temps
 
@@ -56,6 +64,16 @@ class Health_Status:
         self._sensor_temps = psutil.sensors_temperatures()
         return self._sensor_temps
 
+
+    """
+    desc:
+        A series of setters used to change values after init
+    params:
+        self(Health_Status):  The health status obj being passed to itself to call functions within
+
+    return:
+        returns the changed parameter
+    """
     def set_cpu_temp(self):
         temps_string = "\n"
         self.set_sensor_temps()
@@ -64,7 +82,7 @@ class Health_Status:
         if not cores:
             self._cpu_temp = temps_string + "No core temperature sensors found.\n"
             return self._cpu_temp
-
+        # For readability iterate through each item and concat it to the string
         for i, core in enumerate(cores):
             label = f"Core {i}"
             temp = core.current
@@ -123,7 +141,16 @@ class Health_Status:
             usage_string = f"An error occurred getting system memory info: {e}"
         self._memory_usage = usage_string
         return self._memory_usage
+    
 
+    """
+    desc: The string overwrite for the Health_Status obj
+
+    params:  
+        self(Health_Status): The health status obj being passed to itself to call functions within
+    return:
+        (string): The string formatted output of the Health_Status obj
+    """
     def __str__(self):
         return f"""
 CPU Temp: {self._cpu_temp}
@@ -133,7 +160,15 @@ Graphics Usage: {self._graphics_usage}
 Memory Usage: {self._memory_usage}
         """
 
+"""
+desc: 
+    This function is used to convert the health status to a json compat dictionary
+params:
+    status (Health_Status): The health status of the system that the agent is running on
+return:
+    (dict): A dictionary of the information that is to be passed to the dashboard
 
+"""
 def convert_to_dict(status):
     return {
         "CPU Usage": status.get_cpu_usage(),
@@ -150,7 +185,7 @@ my_status = Health_Status()
 # Convert status to a json string
 json_formatted = json.dumps(convert_to_dict(my_status))
 
-
 print(json_formatted)
 
 # send system information
+
